@@ -1,0 +1,88 @@
+/* Includes */
+#include "mbed.h"
+#include "XNucleoIKS01A2.h"
+#define Pressed 0
+#define Released 1
+
+/* Instantiate the expansion board */
+static XNucleoIKS01A2 *mems_expansion_board = XNucleoIKS01A2::instance(D14, D15, D4, D5);
+
+/* Retrieve the composing elements of the expansion board */
+static LSM6DSLSensor *Gyro = mems_expansion_board->acc_gyro;
+
+DigitalIn mybutton(USER_BUTTON);          //Configure button as input
+DigitalOut userLed(LED1);                 //Configure Led as output
+
+volatile int GyroMoveFlag = 0;            //Flag to detect motion
+int ButtonState=Released;                 //Button status is released at the beginning
+int OldButtonState=Released;              //old button status is released at the beginning
+Serial pc(SERIAL_TX, SERIAL_RX);          //Start serial communication with PC
+
+
+/* Interrupt 1 callback. */
+void Gyro_Interrupt() 
+{
+  GyroMoveFlag = 1;                     //Raise Motion flag if motion detected
+}
+
+/* Print the orientation. */
+void send_TiltUPValue() {
+  uint8_t xl = 0;
+  uint8_t xh = 0;
+  uint8_t yl = 0;
+  uint8_t yh = 0;
+  uint8_t zl = 0;
+  uint8_t zh = 0;
+  
+  /*Start reading all tilt directions*/
+  Gyro->get_6d_orientation_xl(&xl);
+  Gyro->get_6d_orientation_xh(&xh);
+  Gyro->get_6d_orientation_yl(&yl);
+  Gyro->get_6d_orientation_yh(&yh);
+  Gyro->get_6d_orientation_zl(&zl);
+  Gyro->get_6d_orientation_zh(&zh);
+  if(xh)                              //If direction is upward
+  {
+      pc.printf("1");                 //send 1 to the PC
+  }
+  //pc.printf("Xv=%d, Xh=%d, Yv=%d, Yh=%d, Zv=%d, Zh=%d",xl,xh,yl,yh,zl,zh);    //used for testing purpose
+}
+
+/* Simple main function */
+int main() 
+{
+  /* Attach callback to LSM6DSL INT1 */
+  Gyro->attach_int1_irq(&Gyro_Interrupt);
+  /* Enable LSM6DSL accelerometer */
+  Gyro->enable_x();
+  /* Enable 6D Orientation. */
+  Gyro->enable_6d_orientation();
+   
+  while(1) 
+  {
+    if (GyroMoveFlag)                           //If motion detected
+    {
+      GyroMoveFlag = 0;
+      LSM6DSL_Event_Status_t GyroStatus;        
+      Gyro->get_event_status(&GyroStatus);      //Get the gyro status
+      if (GyroStatus.D6DOrientationStatus)      //if move is within 6D
+      {
+        send_TiltUPValue();                     //check gyro motion and send 1 if tilt motion is upward
+      }
+    }
+    
+    ButtonState = mybutton;             //Read button status
+    if(ButtonState==Pressed && OldButtonState ==Released)   //if button is pressed and old status was released
+    {
+        pc.printf("1");                 //send 1 to the PC
+        userLed = 1;                      //Turn LED on
+    }
+    else if(ButtonState==Released && OldButtonState ==Pressed)  //if button is released and previous status was pressed
+    {
+        userLed = 0;                      //Turn the LED off
+    }
+    OldButtonState = ButtonState;       //Save the old button status
+    wait(0.001);
+  }
+
+}
